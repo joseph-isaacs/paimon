@@ -27,6 +27,9 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 
 
+_VIEW_TO_PLAIN = {pa.string_view(): pa.utf8(), pa.binary_view(): pa.binary()}
+
+
 class FormatVortexReader(RecordBatchReader):
     """
     A Format Reader that reads record batch from a Vortex file,
@@ -84,7 +87,16 @@ class FormatVortexReader(RecordBatchReader):
         else:
             array_iter = vortex_file.scan(columns_for_vortex, expr=vortex_expr)
 
-        self.record_batch_reader = self._sliced_batches(array_iter.to_arrow(), batch_size)
+        projected = [arrow_schema.field(name) for name in self.existing_fields] \
+            if self.existing_fields else list(arrow_schema)
+        target_schema = pa.schema([f.with_type(_VIEW_TO_PLAIN.get(f.type, f.type)) for f in projected])
+        try:
+            # Converting straight to string/binary avoids copying every view-typed batch.
+            arrow_reader = array_iter.to_arrow(schema=target_schema)
+        except TypeError:
+            # vortex-data releases without the ``schema`` argument.
+            arrow_reader = array_iter.to_arrow()
+        self.record_batch_reader = self._sliced_batches(arrow_reader, batch_size)
 
         self._output_schema = (
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
