@@ -447,11 +447,19 @@ class SplitRead(ABC):
             predicate_fields = (
                 predicate_field_names(self.push_down_predicate)
                 if self.push_down_predicate else set())
+            # Without an Arrow predicate the split re-filters the rows, so a native Vortex
+            # filter is only an optimization. Skip it when positional row IDs need every row.
+            vortex_predicate = (
+                read_paimon_predicate
+                if read_arrow_predicate is not None
+                or (not self.row_tracking_enabled and row_indices is None)
+                else None)
             format_reader = FormatVortexReader(self.table.file_io, file_path, ordered_read_fields,
                                                read_arrow_predicate, batch_size=batch_size,
                                                row_indices=row_indices,
                                                shard_range=shard_range,
-                                               predicate_fields=predicate_fields)
+                                               predicate_fields=predicate_fields,
+                                               paimon_predicate=vortex_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
             if has_nested:
                 raise NotImplementedError(

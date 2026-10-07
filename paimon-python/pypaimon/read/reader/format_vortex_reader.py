@@ -21,6 +21,7 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
@@ -38,38 +39,38 @@ class FormatVortexReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 1024,
                  row_indices: Optional[List[int]] = None,
                  shard_range: Optional[Tuple[int, int]] = None,
-                 predicate_fields: Optional[Set[str]] = None):
+                 predicate_fields: Optional[Set[str]] = None,
+                 paimon_predicate: Optional[Predicate] = None):
         import vortex
 
-        from pypaimon.read.reader.vortex_utils import to_vortex_specified
-        file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, file_path)
-
-        if store_kwargs:
-            from vortex import store
-            vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-            vortex_file = vortex_store.open()
-        else:
-            vortex_file = vortex.open(file_path_for_vortex)
+        from pypaimon.read.reader.vortex_utils import (
+            open_vortex_file, paimon_predicate_to_vortex)
+        vortex_file = open_vortex_file(file_io, file_path)
 
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
 
         # Identify which fields exist in the file and which are missing
-        file_schema_names = set(vortex_file.dtype.to_arrow_schema().names)
+        arrow_schema = vortex_file.dtype.to_arrow_schema()
+        file_schema_names = set(arrow_schema.names)
         self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
         self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
 
         columns_for_vortex = self.existing_fields if self.existing_fields else None
 
-        # Try to convert Arrow predicate to Vortex expr for native push-down
-        vortex_expr = None
-        if push_down_predicate is not None:
+        # A non-None ``push_down_predicate`` means the caller relies on this reader to filter
+        # exactly, so whatever cannot be evaluated natively is applied to the output in Arrow.
+        if paimon_predicate is not None:
+            vortex_expr, exact = paimon_predicate_to_vortex(paimon_predicate, arrow_schema)
+        elif push_down_predicate is not None:
             try:
                 from vortex.arrow.expression import arrow_to_vortex
-                arrow_schema = vortex_file.dtype.to_arrow_schema()
-                vortex_expr = arrow_to_vortex(push_down_predicate, arrow_schema)
+                vortex_expr, exact = arrow_to_vortex(push_down_predicate, arrow_schema), True
             except Exception:
-                pass
+                vortex_expr, exact = None, False
+        else:
+            vortex_expr, exact = None, True
+        self._post_filter = push_down_predicate if not exact else None
 
         # Scan with Vortex's natural (layout-aligned) splits rather than forcing
         # ``batch_size``-row splits, which fragments the scan into many tiny
@@ -123,6 +124,15 @@ class FormatVortexReader(RecordBatchReader):
         return batch
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
+        while True:
+            batch = self._read_unfiltered_batch()
+            if batch is None or self._post_filter is None:
+                return batch
+            table = pa.Table.from_batches([batch]).filter(self._post_filter)
+            if table.num_rows > 0:
+                return table.combine_chunks().to_batches()[0]
+
+    def _read_unfiltered_batch(self) -> Optional[RecordBatch]:
         try:
             batch = next(self.record_batch_reader)
 
