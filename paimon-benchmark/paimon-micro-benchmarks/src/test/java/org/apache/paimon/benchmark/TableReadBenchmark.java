@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -133,6 +134,55 @@ public class TableReadBenchmark extends TableBenchmark {
          * ------------------------------------------------------------------------------------------------
          * OPERATORTEST_read_read-parquet            716 /  728           4187.4            238.8       1.0X
          */
+    }
+
+    @Test
+    public void testVortexRead() throws Exception {
+        innerTest(Collections.singletonMap("vortex", prepareData(vortex(), "vortex")));
+    }
+
+    @Test
+    public void testVortexReadProjection() throws Exception {
+        innerTestProjection(
+                Collections.singletonMap("vortex", prepareData(vortex(), "vortex")),
+                new int[] {0, 5, 10, 14});
+    }
+
+    @Test
+    public void testVortexReadProjection1() throws Exception {
+        innerTestProjection(
+                Collections.singletonMap("vortex", prepareData(vortex(), "vortex")),
+                new int[] {10});
+    }
+
+    /** Runs all columnar formats in one benchmark so the Relative column compares them. */
+    @Test
+    public void testColumnarFormatsRead() throws Exception {
+        innerTest(columnarTables());
+    }
+
+    @Test
+    public void testColumnarFormatsReadProjection() throws Exception {
+        innerTestProjection(columnarTables(), new int[] {0, 5, 10, 14});
+    }
+
+    @Test
+    public void testColumnarFormatsReadProjection1() throws Exception {
+        innerTestProjection(columnarTables(), new int[] {10});
+    }
+
+    private Map<String, Table> columnarTables() throws Exception {
+        Map<String, Table> tables = new LinkedHashMap<>();
+        tables.put("parquet", prepareData(parquet(), "parquet"));
+        tables.put("orc", prepareData(orc(), "orc"));
+        tables.put("vortex", prepareData(vortex(), "vortex"));
+        return tables;
+    }
+
+    private Options vortex() {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "vortex");
+        return options;
     }
 
     private Options orc() {

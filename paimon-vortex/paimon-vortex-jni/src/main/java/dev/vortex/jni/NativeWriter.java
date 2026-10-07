@@ -30,7 +30,15 @@ public final class NativeWriter {
     private NativeWriter() {}
 
     public static native long create(
-            long sessionPtr, String uri, long arrowSchemaAddr, Map<String, String> options);
+            long sessionPtr,
+            String uri,
+            long arrowSchemaAddr,
+            Map<String, String> options,
+            Map<String, byte[]> metadata);
+
+    public static native long bytesWritten(long writerPtr);
+
+    public static native long bufferedBytes(long writerPtr);
 
     public static native boolean writeBatch(
             long writerPtr, long arrowArrayAddr, long arrowSchemaAddr);

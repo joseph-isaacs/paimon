@@ -33,7 +33,11 @@ public final class NativeDataSource {
 
     public static native void free(long dataSourcePtr);
 
-    public static native void arrowSchema(long dataSourcePtr, long arrowSchemaOutAddr);
+    public static native void arrowSchema(
+            long sessionPtr, long dataSourcePtr, long arrowSchemaOutAddr);
+
+    /** Result: out[0] = byte size value, out[1] = type (1=estimate, 2=exact, other=unknown). */
+    public static native void byteSize(long dataSourcePtr, long[] resultOut);
 
     /** Result: out[0] = row count value, out[1] = type (1=estimate, 2=exact, other=unknown). */
     public static native void rowCount(long dataSourcePtr, long[] resultOut);

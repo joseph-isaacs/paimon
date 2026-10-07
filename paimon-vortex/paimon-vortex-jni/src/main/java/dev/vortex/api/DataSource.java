@@ -80,6 +80,7 @@ public final class DataSource implements AutoCloseable {
                         rangeBegin,
                         rangeEnd,
                         selectionIndices,
+                        null,
                         selectionMode,
                         limit,
                         ordered);

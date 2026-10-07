@@ -34,13 +34,14 @@ public final class NativeScan {
             long rowRangeBegin,
             long rowRangeEnd,
             long[] selectionIndices,
+            byte[] selectionRoaringBitmap,
             byte selectionModeCode,
             long limit,
             boolean ordered);
 
     public static native void free(long scanPtr);
 
-    public static native void arrowSchema(long scanPtr, long arrowSchemaOutAddr);
+    public static native void arrowSchema(long sessionPtr, long scanPtr, long arrowSchemaOutAddr);
 
     public static native void partitionCount(long scanPtr, long[] resultOut);
 

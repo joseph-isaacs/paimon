@@ -50,7 +50,11 @@ public final class VortexWriter implements AutoCloseable {
             Data.exportSchema(schemaAllocator, arrowSchema, null, cSchema);
             long ptr =
                     NativeWriter.create(
-                            session.nativePointer(), uri, cSchema.memoryAddress(), options);
+                            session.nativePointer(),
+                            uri,
+                            cSchema.memoryAddress(),
+                            options,
+                            null);
             cSchema.close();
             if (ptr <= 0) {
                 throw new IOException("Failed to create Vortex writer for: " + uri);

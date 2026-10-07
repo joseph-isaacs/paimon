@@ -158,6 +158,12 @@ under the License.
             <version>${project.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-vortex-format</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Test -->
 
         <dependency>
