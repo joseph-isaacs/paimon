@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Any, Set, Tuple
+from typing import Any, Iterator, List, Optional, Set, Tuple
 
 import pyarrow as pa
 from pyarrow import RecordBatch
@@ -71,20 +71,33 @@ class FormatVortexReader(RecordBatchReader):
             except Exception:
                 pass
 
-        indices = None
+        # Scan with Vortex's natural (layout-aligned) splits rather than forcing
+        # ``batch_size``-row splits, which fragments the scan into many tiny
+        # tasks. Batches are re-sliced to ``batch_size`` on the Arrow side.
         if row_indices is not None:
-            indices = vortex.array(row_indices)
+            array_iter = vortex_file.scan(
+                columns_for_vortex, expr=vortex_expr, indices=vortex.array(row_indices))
         elif shard_range is not None:
-            # Vortex lacks a native range/slice scan API, so we materialize an
-            # index array. Acceptable trade-off vs reading the full file.
-            indices = vortex.array(range(shard_range[0], shard_range[1]))
+            array_iter = vortex_file.to_repeated_scan(
+                columns_for_vortex, expr=vortex_expr).execute(row_range=shard_range)
+        else:
+            array_iter = vortex_file.scan(columns_for_vortex, expr=vortex_expr)
 
-        self.record_batch_reader = vortex_file.scan(
-            columns_for_vortex, expr=vortex_expr, indices=indices, batch_size=batch_size).to_arrow()
+        self.record_batch_reader = self._sliced_batches(array_iter.to_arrow(), batch_size)
 
         self._output_schema = (
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
         )
+
+    @staticmethod
+    def _sliced_batches(reader: pa.RecordBatchReader, batch_size: int) -> Iterator[RecordBatch]:
+        for batch in reader:
+            batch = FormatVortexReader._cast_view_types(batch)
+            if batch_size <= 0 or batch.num_rows <= batch_size:
+                yield batch
+                continue
+            for offset in range(0, batch.num_rows, batch_size):
+                yield batch.slice(offset, batch_size)
 
     @staticmethod
     def _cast_view_types(batch: RecordBatch) -> RecordBatch:
@@ -112,7 +125,6 @@ class FormatVortexReader(RecordBatchReader):
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
             batch = next(self.record_batch_reader)
-            batch = self._cast_view_types(batch)
 
             if not self.missing_fields:
                 return batch

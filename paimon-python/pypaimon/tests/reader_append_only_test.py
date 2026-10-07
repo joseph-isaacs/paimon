@@ -315,6 +315,32 @@ class AoReaderTest(unittest.TestCase):
         actual = pa.concat_tables(shard_tables).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_ao_reader_respects_batch_size(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={
+            'file.format': 'vortex',
+            CoreOptions.READ_BATCH_SIZE.key(): '2',
+        })
+        self.catalog.create_table('default.test_append_only_vortex_batch_size', schema, False)
+        table = self.catalog.get_table('default.test_append_only_vortex_batch_size')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        for splits in (
+                read_builder.new_scan().plan().splits(),
+                read_builder.new_scan().with_shard(0, 2).plan().splits()):
+            batches = list(table_read.to_arrow_batch_reader(splits))
+            self.assertTrue(all(b.num_rows <= 2 for b in batches))
+
+        shard_tables = []
+        for i in range(2):
+            splits = read_builder.new_scan().with_shard(i, 2).plan().splits()
+            shard_tables.append(pa.Table.from_batches(
+                list(table_read.to_arrow_batch_reader(splits))))
+        actual = pa.concat_tables(shard_tables).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
     def test_lance_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
         self.catalog.create_table('default.test_append_only_lance_filter', schema, False)
